@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import anthropic from '@/lib/anthropic';
 import { extractJSON } from '@/lib/utils';
+import { validateText, validatePeople, sanitizeText, clientError } from '@/lib/validate';
 import type { ShoppingListResponse } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -8,15 +9,25 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { dishName: string; ingredients: { name: string; amount: string }[]; people: number };
+    const body = await req.json() as { dishName: unknown; ingredients: unknown; people: unknown };
 
-    if (!body.dishName) {
-      return NextResponse.json({ error: 'Chýba názov jedla' }, { status: 400 });
-    }
+    const errName = validateText(body.dishName, 'názov jedla', 200);
+    if (errName) return NextResponse.json(clientError(errName), { status: 400 });
 
-    const people = body.people ?? 5;
-    const ingredientsPart = body.ingredients?.length
-      ? `Na základe týchto ingrediencií (1 porcia):\n${JSON.stringify(body.ingredients, null, 2)}\n\n`
+    const errPeople = validatePeople(body.people);
+    if (errPeople) return NextResponse.json(clientError(errPeople), { status: 400 });
+
+    const dishName = sanitizeText(String(body.dishName));
+    const people = Number(body.people);
+    const ingredients = Array.isArray(body.ingredients)
+      ? body.ingredients.slice(0, 30).map((i) => ({
+          name: sanitizeText(String((i as { name?: unknown }).name ?? '')),
+          amount: sanitizeText(String((i as { amount?: unknown }).amount ?? '')),
+        }))
+      : [];
+
+    const ingredientsPart = ingredients.length
+      ? `Ingrediencie receptu (1 porcia):\n${JSON.stringify(ingredients)}\n\n`
       : '';
 
     const response = await anthropic.messages.create({
@@ -26,24 +37,11 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: 'user',
-          content: `${ingredientsPart}Vytvor kompletný nákupný zoznam na prípravu "${body.dishName}" pre ${people} ľudí.
-Zaokrúhli množstvá na bežné balenia dostupné v obchode (napr. 500g nie 437g).
-Zoskup položky podľa kategórie.
+          content: `${ingredientsPart}Vytvor nákupný zoznam na prípravu jedla [${dishName}] pre ${people} osôb.
+Zaokrúhli na bežné balenia (napr. 500g nie 437g). Zoskup podľa kategórie.
 
-Odpovedaj VÝLUČNE v tomto JSON formáte:
-{
-  "dishName": "${body.dishName}",
-  "people": ${people},
-  "items": [
-    {
-      "name": "názov položky po slovensky",
-      "amount": "množstvo ako číslo",
-      "unit": "jednotka (g, kg, ml, l, ks)",
-      "category": "mäso|zelenina|mliečne výrobky|koreniny|obilniny|ostatné"
-    }
-  ],
-  "estimatedCost": "odhad celkovej ceny v EUR"
-}`,
+JSON formát:
+{"dishName":"...","people":${people},"items":[{"name":"...","amount":"...","unit":"g|kg|ml|l|ks","category":"mäso|zelenina|mliečne výrobky|koreniny|obilniny|ostatné"}],"estimatedCost":"cca X €"}`,
         },
       ],
     });
@@ -55,9 +53,6 @@ Odpovedaj VÝLUČNE v tomto JSON formáte:
     return NextResponse.json(result);
   } catch (error) {
     console.error('[shopping-list] error:', error);
-    return NextResponse.json(
-      { error: 'Chyba pri generovaní nákupného zoznamu', details: error instanceof Error ? error.message : 'Neznáma chyba' },
-      { status: 500 }
-    );
+    return NextResponse.json(clientError('Chyba pri generovaní nákupného zoznamu'), { status: 500 });
   }
 }

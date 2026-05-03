@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import anthropic from '@/lib/anthropic';
 import { extractJSON } from '@/lib/utils';
+import { validateImage, clientError } from '@/lib/validate';
 import type { PhotoAnalysisResponse } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -9,16 +10,14 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { imageBase64, mediaType } = body as {
-      imageBase64: string;
-      mediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
-    };
+    const { imageBase64, mediaType } = body as { imageBase64: unknown; mediaType: unknown };
 
-    if (!imageBase64 || !mediaType) {
-      return NextResponse.json({ error: 'Chýba obrázok alebo typ média' }, { status: 400 });
-    }
+    const err = validateImage(imageBase64, mediaType);
+    if (err) return NextResponse.json(clientError(err), { status: 400 });
 
-    const base64Data = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
+    const base64Data = (imageBase64 as string).includes(',')
+      ? (imageBase64 as string).split(',')[1]
+      : (imageBase64 as string);
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
@@ -29,26 +28,20 @@ export async function POST(req: NextRequest) {
           content: [
             {
               type: 'image',
-              source: {
-                type: 'base64',
-                media_type: mediaType,
-                data: base64Data,
-              },
+              source: { type: 'base64', media_type: mediaType as 'image/jpeg', data: base64Data },
             },
             {
               type: 'text',
-              text: `Analyzuj fotografiu jedla dôkladne. Identifikuj:
-1. Presný názov jedla (po slovensky)
-2. Všetky viditeľné ingrediencie s čo najpresnejším odhadovaným množstvom
+              text: `Analyzuj fotografiu jedla. Identifikuj názov jedla a všetky ingrediencie s odhadovaným množstvom.
 
 Odpovedaj VÝLUČNE vo formáte JSON (bez markdown blokov):
 {
   "dishName": "názov jedla po slovensky",
   "ingredients": [
-    { "name": "ingrediencia po slovensky", "amount": "množstvo s jednotkou (napr. 150 g)", "note": "voliteľná poznámka" }
+    { "name": "ingrediencia po slovensky", "amount": "množstvo s jednotkou" }
   ],
-  "confidence": "high alebo medium alebo low",
-  "notes": "voliteľné celkové poznámky k analýze"
+  "confidence": "high|medium|low",
+  "notes": "voliteľné poznámky"
 }`,
             },
           ],
@@ -63,9 +56,6 @@ Odpovedaj VÝLUČNE vo formáte JSON (bez markdown blokov):
     return NextResponse.json(result);
   } catch (error) {
     console.error('[analyze-photo] error:', error);
-    return NextResponse.json(
-      { error: 'Chyba pri analýze fotografie', details: error instanceof Error ? error.message : 'Neznáma chyba' },
-      { status: 500 }
-    );
+    return NextResponse.json(clientError('Chyba pri analýze fotografie'), { status: 500 });
   }
 }

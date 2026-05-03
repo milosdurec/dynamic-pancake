@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import anthropic from '@/lib/anthropic';
 import { extractJSON } from '@/lib/utils';
+import { validateText, sanitizeText, clientError } from '@/lib/validate';
 import type { ReviewsResponse } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -8,37 +9,38 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { restaurantName: string; userComments: string; dishName?: string };
+    const body = await req.json() as { restaurantName: unknown; userComments: unknown; dishName?: unknown };
 
-    if (!body.restaurantName || !body.userComments) {
-      return NextResponse.json({ error: 'Chýba názov reštaurácie alebo komentáre' }, { status: 400 });
-    }
+    const errName = validateText(body.restaurantName, 'názov reštaurácie', 200);
+    if (errName) return NextResponse.json(clientError(errName), { status: 400 });
+
+    const errComments = validateText(body.userComments, 'komentáre', 2000);
+    if (errComments) return NextResponse.json(clientError(errComments), { status: 400 });
+
+    const restaurantName = sanitizeText(String(body.restaurantName));
+    const userComments = sanitizeText(String(body.userComments));
+    const dishName = body.dishName ? sanitizeText(String(body.dishName)).slice(0, 200) : null;
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1500,
+      system: 'Si expert na písanie recenzií. Odpovedaj VÝLUČNE platným JSON bez markdown blokov.',
       messages: [
         {
           role: 'user',
-          content: `Na základe komentárov zákazníka o reštaurácii "${body.restaurantName}"${
-            body.dishName ? ` (jedlo: ${body.dishName})` : ''
-          }:
+          content: `Napíš dve recenzie v ANGLIČTINE pre reštauráciu [${restaurantName}]${dishName ? ` (jedlo: [${dishName}])` : ''}.
 
-KOMENTÁRE ZÁKAZNÍKA (môžu byť po slovensky alebo anglicky):
-"${body.userComments}"
+Zákazník napísal tieto dojmy (zachovaj jeho štýl a tón):
+"""
+${userComments}
+"""
 
-Vygeneruj dve recenzie v ANGLIČTINE zachovajúc štýl a tón zákazníka:
-1. Google recenzia: krátka (2-3 vety), priateľská, priama
-2. TripAdvisor recenzia: dlhšia (4-6 viet), detailnejšia, opisuje zážitok
+Vygeneruj:
+1. Google recenzia: krátka (2-3 vety), priateľská
+2. TripAdvisor recenzia: dlhšia (4-6 viet), detailnejšia
 
-Na základe komentárov odhadni hviezdičkové hodnotenie (1-5).
-
-Odpovedaj VÝLUČNE vo formáte JSON (bez markdown blokov):
-{
-  "googleReview": "recenzia pre Google v angličtine",
-  "tripAdvisorReview": "recenzia pre TripAdvisor v angličtine",
-  "starRating": 4
-}`,
+JSON formát:
+{"googleReview":"...","tripAdvisorReview":"...","starRating":4}`,
         },
       ],
     });
@@ -50,9 +52,6 @@ Odpovedaj VÝLUČNE vo formáte JSON (bez markdown blokov):
     return NextResponse.json(result);
   } catch (error) {
     console.error('[reviews] error:', error);
-    return NextResponse.json(
-      { error: 'Chyba pri generovaní recenzií', details: error instanceof Error ? error.message : 'Neznáma chyba' },
-      { status: 500 }
-    );
+    return NextResponse.json(clientError('Chyba pri generovaní recenzií'), { status: 500 });
   }
 }

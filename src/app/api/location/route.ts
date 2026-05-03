@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import anthropic from '@/lib/anthropic';
 import { extractJSON, reformatAsJSON } from '@/lib/utils';
+import { validateText, validateCoords, sanitizeText, clientError } from '@/lib/validate';
 import type { LocationResponse } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -11,38 +12,39 @@ const JSON_SCHEMA = `{
   "address": "adresa alebo null",
   "rating": "napr. 4.3/5 alebo null",
   "priceRange": "€ alebo €€ alebo €€€",
-  "specialties": ["špeciality reštaurácie"],
-  "assessment": "celkové hodnotenie po slovensky (2-3 vety)",
-  "pros": ["kladná stránka 1", "kladná stránka 2"],
-  "cons": ["záporná stránka 1"],
+  "specialties": ["špeciality"],
+  "assessment": "hodnotenie po slovensky (2-3 vety)",
+  "pros": ["kladná stránka"],
+  "cons": ["záporná stránka"],
   "recommendation": "záverečné odporúčanie po slovensky"
 }`;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { restaurantName: string; latitude?: number; longitude?: number };
+    const body = await req.json() as { restaurantName: unknown; latitude?: unknown; longitude?: unknown };
 
-    if (!body.restaurantName) {
-      return NextResponse.json({ error: 'Chýba názov reštaurácie' }, { status: 400 });
-    }
+    const errName = validateText(body.restaurantName, 'názov reštaurácie', 200);
+    if (errName) return NextResponse.json(clientError(errName), { status: 400 });
 
-    const geoHint = body.latitude && body.longitude
-      ? ` na GPS súradniciach ${body.latitude}, ${body.longitude}`
-      : '';
+    const errCoords = validateCoords(body.latitude, body.longitude);
+    if (errCoords) return NextResponse.json(clientError(errCoords), { status: 400 });
+
+    const restaurantName = sanitizeText(String(body.restaurantName));
+    const lat = body.latitude !== undefined ? Number(body.latitude).toFixed(6) : null;
+    const lng = body.longitude !== undefined ? Number(body.longitude).toFixed(6) : null;
+    const geoHint = lat && lng ? ` na súradniciach ${lat}, ${lng}` : '';
 
     const res = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
-      system: 'Si expert na hodnotenie reštaurácií a lokalít. Odpovedaj VÝLUČNE platným JSON bez markdown blokov.',
+      system: 'Si expert na hodnotenie reštaurácií. Odpovedaj VÝLUČNE platným JSON bez markdown blokov.',
       messages: [
         {
           role: 'user',
-          content: `Zhodnoť reštauráciu "${body.restaurantName}"${geoHint}.
-Na základe názvu a polohy odhadni typ reštaurácie, typické hodnotenie, cenovú kategóriu, špeciality a charakteristiky lokality.
-Buď konkrétny a realistický.
+          content: `Zhodnoť reštauráciu s názvom: [${restaurantName}]${geoHint}.
+Odhadni typ, hodnotenie, cenovú kategóriu, špeciality a charakteristiku polohy. Buď konkrétny.
 
-Odpovedaj VÝLUČNE v tomto JSON formáte:
-${JSON_SCHEMA}`,
+JSON formát:\n${JSON_SCHEMA}`,
         },
       ],
     });
@@ -61,9 +63,6 @@ ${JSON_SCHEMA}`,
     return NextResponse.json(result);
   } catch (error) {
     console.error('[location] error:', error);
-    return NextResponse.json(
-      { error: 'Chyba pri hodnotení lokality', details: error instanceof Error ? error.message : 'Neznáma chyba' },
-      { status: 500 }
-    );
+    return NextResponse.json(clientError('Chyba pri hodnotení lokality'), { status: 500 });
   }
 }

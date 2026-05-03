@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import anthropic from '@/lib/anthropic';
 import { extractJSON } from '@/lib/utils';
+import { validateText, sanitizeText, clientError } from '@/lib/validate';
 import type { NutritionResponse, NutritionRequest } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -10,35 +11,26 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as NutritionRequest;
 
-    if (!body.dishName || !body.ingredients?.length) {
-      return NextResponse.json({ error: 'Chýba názov jedla alebo ingrediencie' }, { status: 400 });
+    const err = validateText(body.dishName, 'názov jedla', 200);
+    if (err) return NextResponse.json(clientError(err), { status: 400 });
+    if (!Array.isArray(body.ingredients) || body.ingredients.length === 0) {
+      return NextResponse.json(clientError('Chýbajú ingrediencie'), { status: 400 });
     }
+
+    const dishName = sanitizeText(body.dishName);
+    const ingredients = body.ingredients.slice(0, 30).map((i) => ({
+      name: sanitizeText(String(i.name ?? '')),
+      amount: sanitizeText(String(i.amount ?? '')),
+    }));
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
+      system: 'Si nutričný expert. Odpovedaj VÝLUČNE platným JSON bez markdown blokov.',
       messages: [
         {
           role: 'user',
-          content: `Pre jedlo "${body.dishName}" s nasledovnými ingredienciami:
-${JSON.stringify(body.ingredients, null, 2)}
-
-Vypočítaj nutričné hodnoty čo najpresnejšie na základe štandardných nutričných databáz.
-Odpovedaj VÝLUČNE vo formáte JSON (bez markdown blokov):
-{
-  "dishName": "${body.dishName}",
-  "servingSize": "odhadovaná veľkosť porcie v gramoch",
-  "table": [
-    { "nutrient": "Kalórie", "per100g": "hodnota kcal", "perServing": "hodnota kcal" },
-    { "nutrient": "Bielkoviny", "per100g": "hodnota g", "perServing": "hodnota g" },
-    { "nutrient": "Sacharidy", "per100g": "hodnota g", "perServing": "hodnota g" },
-    { "nutrient": "z toho cukry", "per100g": "hodnota g", "perServing": "hodnota g" },
-    { "nutrient": "Tuky", "per100g": "hodnota g", "perServing": "hodnota g" },
-    { "nutrient": "z toho nasýtené", "per100g": "hodnota g", "perServing": "hodnota g" },
-    { "nutrient": "Vláknina", "per100g": "hodnota g", "perServing": "hodnota g" },
-    { "nutrient": "Sodík", "per100g": "hodnota mg", "perServing": "hodnota mg" }
-  ]
-}`,
+          content: `Pre jedlo "${dishName}" s ingredienciami:\n${JSON.stringify(ingredients)}\n\nVypočítaj nutričné hodnoty.\n\nJSON formát:\n{"dishName":"...","servingSize":"... g","table":[{"nutrient":"Kalórie","per100g":"... kcal","perServing":"... kcal"},{"nutrient":"Bielkoviny","per100g":"... g","perServing":"... g"},{"nutrient":"Sacharidy","per100g":"... g","perServing":"... g"},{"nutrient":"z toho cukry","per100g":"... g","perServing":"... g"},{"nutrient":"Tuky","per100g":"... g","perServing":"... g"},{"nutrient":"z toho nasýtené","per100g":"... g","perServing":"... g"},{"nutrient":"Vláknina","per100g":"... g","perServing":"... g"},{"nutrient":"Sodík","per100g":"... mg","perServing":"... mg"}]}`,
         },
       ],
     });
@@ -50,9 +42,6 @@ Odpovedaj VÝLUČNE vo formáte JSON (bez markdown blokov):
     return NextResponse.json(result);
   } catch (error) {
     console.error('[nutrition] error:', error);
-    return NextResponse.json(
-      { error: 'Chyba pri výpočte nutričných hodnôt', details: error instanceof Error ? error.message : 'Neznáma chyba' },
-      { status: 500 }
-    );
+    return NextResponse.json(clientError('Chyba pri výpočte nutričných hodnôt'), { status: 500 });
   }
 }
