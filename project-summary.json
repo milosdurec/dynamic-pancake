@@ -1,0 +1,144 @@
+{
+  "project": "Dynamic Pancake",
+  "repository": "https://github.com/milosdurec/dynamic-pancake",
+  "created": "2026-05-03",
+  "stack": {
+    "framework": "Next.js 16.2.4 (App Router, Turbopack)",
+    "language": "TypeScript",
+    "ui": ["React 19", "Tailwind CSS v4", "Lucide React"],
+    "ai": "Claude claude-sonnet-4-6 via @anthropic-ai/sdk",
+    "runtime": "Node.js"
+  },
+  "modules": [
+    {
+      "step": 1,
+      "name": "Analýza fotografie",
+      "route": "/api/analyze-photo",
+      "description": "Claude Vision identifikuje ingrediencie a odhaduje množstvá",
+      "output_language": "slovenčina"
+    },
+    {
+      "step": 2,
+      "name": "Nutričné hodnoty",
+      "route": "/api/nutrition",
+      "description": "Kalórie, bielkoviny, tuky, sacharidy, vláknina, sodík na 100g aj porciu",
+      "output_language": "slovenčina"
+    },
+    {
+      "step": 3,
+      "name": "Najlepší recept",
+      "route": "/api/recipe",
+      "description": "Recept s ingredienciami, postupom, časom prípravy a zdrojom",
+      "output_language": "slovenčina"
+    },
+    {
+      "step": 4,
+      "name": "Nákupný zoznam",
+      "route": "/api/shopping-list",
+      "description": "Škálovaný recept pre 5 osôb, zoskupený podľa kategórií s odhadom ceny",
+      "output_language": "slovenčina"
+    },
+    {
+      "step": 5,
+      "name": "Hodnotenie lokality",
+      "route": "/api/location",
+      "description": "Hodnotenie reštaurácie podľa názvu a GPS: rating, plusy, mínusy, odporúčanie",
+      "output_language": "slovenčina"
+    },
+    {
+      "step": 6,
+      "name": "Recenzie",
+      "route": "/api/reviews",
+      "description": "Google + TripAdvisor recenzie v štýle používateľa na základe komentárov",
+      "output_language": "angličtina"
+    }
+  ],
+  "ux_features": [
+    "Dashboard layout — všetky výsledky viditeľné naraz",
+    "Auto-trigger pipeline — upload → nutrition + recipe paralelne → shopping list",
+    "Camera capture cez getUserMedia (zadná kamera na mobile)",
+    "Automatická kompresia obrázkov na klientovi (max 4.5 MB)",
+    "Skeleton loadery a fade animácie",
+    "Copy-to-clipboard pre recenzie",
+    "Mobile-first responsive (1 stĺpec / 2 stĺpce)"
+  ],
+  "security": [
+    "Server-side validácia všetkých vstupov (typ/veľkosť obrázka, dĺžky textov, GPS bounds, počet osôb 1–100)",
+    "Sanitizácia vstupov pred vložením do Claude promptov",
+    "Vstupy obalené v [square brackets] v promptoch (prompt injection mitigation)",
+    "Security HTTP hlavičky (X-Frame-Options, X-Content-Type-Options, Permissions-Policy...)",
+    "Chybové hlášky neodhaľujú internú logiku (clientError pattern)",
+    "API kľúč nikdy necommitnutý (.gitignore pokrýva .env*)"
+  ],
+  "known_limitations": [
+    {
+      "issue": "web_search_20260209 nefunguje",
+      "reason": "Vyžaduje špeciálny Anthropic plán, na štandardnom kľúči sa zasekáva",
+      "workaround": "Recipe a location používajú Claude tréningové znalosti"
+    },
+    {
+      "issue": "Recepty nie sú live z webu",
+      "reason": "Bez real-time web search",
+      "workaround": "Claude generuje z tréningových dát (kvalitné, ale nie aktuálne URL)"
+    },
+    {
+      "issue": "Hodnotenie reštaurácie je odhadnuté",
+      "reason": "Bez Google Maps API alebo TripAdvisor API",
+      "workaround": "Claude odhaduje na základe názvu a polohy"
+    }
+  ],
+  "todo_before_production": [
+    {
+      "priority": 1,
+      "task": "Rate limiting",
+      "description": "Bez neho môže ktokoľvek vybíjať Anthropic kredit — Vercel vstavaný rate limiting alebo middleware"
+    },
+    {
+      "priority": 1,
+      "task": "Autentifikácia",
+      "description": "Prístupový kód alebo Clerk/NextAuth ak nemá byť verejne prístupná"
+    },
+    {
+      "priority": 2,
+      "task": "Google Maps API",
+      "description": "Reálna adresa, hodnotenie a fotky reštaurácie"
+    },
+    {
+      "priority": 2,
+      "task": "Real-time recept vyhľadávanie",
+      "description": "Serper API alebo Brave Search API namiesto Claude znalostí"
+    },
+    {
+      "priority": 2,
+      "task": "História analýz",
+      "description": "Ukladanie výsledkov (napr. Supabase)"
+    },
+    {
+      "priority": 3,
+      "task": "Export do PDF",
+      "description": "Nákupný zoznam a recept"
+    },
+    {
+      "priority": 3,
+      "task": "Porovnanie s dennými normami",
+      "description": "Nutričné hodnoty ako % DRI"
+    },
+    {
+      "priority": 3,
+      "task": "Nasadenie na Vercel",
+      "description": "npx vercel --prod, API kľúč cez Vercel Environment Variables"
+    }
+  ],
+  "commands": {
+    "dev": "npm run dev",
+    "build": "npm run build",
+    "lint": "npm run lint"
+  },
+  "environment_variables": {
+    "ANTHROPIC_API_KEY": {
+      "required": true,
+      "description": "Anthropic API kľúč — console.anthropic.com",
+      "file": ".env.local"
+    }
+  }
+}

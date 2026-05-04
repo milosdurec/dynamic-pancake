@@ -18,11 +18,40 @@ export default function PhotoCapture({ onImage, preview, onClear, disabled }: Ph
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  function compressImage(dataUrl: string, mimeType: string, callback: (compressed: string) => void) {
+    const img = new Image();
+    img.onload = () => {
+      const MAX_PX = 1920;
+      const MAX_BYTES = 4.5 * 1024 * 1024; // 4.5 MB base64 target
+      let { width, height } = img;
+      if (width > MAX_PX || height > MAX_PX) {
+        const ratio = Math.min(MAX_PX / width, MAX_PX / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d')?.drawImage(img, 0, 0, width, height);
+      let quality = 0.88;
+      let result = canvas.toDataURL('image/jpeg', quality);
+      // reduce quality until under limit
+      while (result.length > MAX_BYTES && quality > 0.4) {
+        quality -= 0.1;
+        result = canvas.toDataURL('image/jpeg', quality);
+      }
+      callback(result);
+    };
+    img.src = dataUrl;
+  }
+
   function readFile(file: File) {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const result = e.target?.result as string;
-      onImage(result, file.type || 'image/jpeg');
+      const raw = e.target?.result as string;
+      compressImage(raw, file.type || 'image/jpeg', (compressed) => {
+        onImage(compressed, 'image/jpeg');
+      });
     };
     reader.readAsDataURL(file);
   }
@@ -73,7 +102,9 @@ export default function PhotoCapture({ onImage, preview, onClear, disabled }: Ph
     canvas.getContext('2d')?.drawImage(video, 0, 0);
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
     stopCamera();
-    onImage(dataUrl, 'image/jpeg');
+    compressImage(dataUrl, 'image/jpeg', (compressed) => {
+      onImage(compressed, 'image/jpeg');
+    });
   }
 
   function handleClear() {
